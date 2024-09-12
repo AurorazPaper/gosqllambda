@@ -34,7 +34,7 @@ type faxLog struct {
 	// owner       string
 	// dcs         string
 	jobinfo string // totpages/ntries/ndials/totdials/maxdials/tottries/maxtries
-	// system      string // zPaper: record source host name (part of passed in params)
+	system  string // zPaper: record source host name (part of passed in params)
 	// did         string // zPaper: callid stripped of non-digits prefixed with leading 1 if necessary
 }
 
@@ -52,6 +52,14 @@ type inboundColumns struct {
 	reason       string
 	receivedfile string
 }
+
+type columnTransferInfo struct {
+	originTable       string
+	originColumn      string
+	destinationTable  string
+	destinationColumn string
+}
+
 type GoTestEvent struct {
 	Name string `json:"name"`
 }
@@ -129,12 +137,16 @@ func queryfaxrecords(recordtype string) (interface{}, error) {
 		var log faxLog
 
 		log.datetime = ""
+		log.entrytype = ""
 		log.qfile = ""
+		log.commid = ""
 		log.localnumber = ""
 		log.tsi = ""
+		log.conntime = ""
 		log.cidname = ""
 		log.cidnumber = ""
 		log.jobinfo = ""
+		log.system = ""
 
 		if err := rows.Scan(&log.datetime, &log.qfile, &log.localnumber, &log.tsi, &log.npages, &log.cidname, &log.cidnumber, &log.jobinfo); err != nil {
 			return nil, fmt.Errorf("queryfaxrecords %q: %v", recordtype, err)
