@@ -100,9 +100,28 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 	createTableSQL := `
 		CREATE TABLE IF NOT EXISTS inboundReportTable (
 			id INT AUTO_INCREMENT PRIMARY KEY,
-			,
-			email VARCHAR(100),
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			starttime DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00' COMMENT 'date from xferfaxlog MM/dd/yy HH:mm, 24 HR clock',
+			entrytype VARCHAR(6) NOT NULL DEFAULT '' COMMENT 'SEND,RECV,CALL,POLL,PAGE,UNSENT,SUBMIT,PROXY',
+			commid VARCHAR(11) NOT NULL DEFAULT '',
+			modem VARCHAR(8) DEFAULT NULL,
+			qfile VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'SEND: jobid',
+			jobtag VARCHAR(255) DEFAULT NULL COMMENT 'RECV: NULL',
+			sender VARCHAR(255) DEFAULT NULL COMMENT 'The sender/receiver electronic mailing address (facsimile receptions are always attributed to the "fax" user).',
+			localnumber VARCHAR(255) DEFAULT NULL COMMENT 'SEND: destnumber',
+			tsi VARCHAR(255) DEFAULT NULL COMMENT 'SEND: csi',
+			params VARCHAR(255) DEFAULT NULL,
+			npages VARCHAR(4) DEFAULT '0',
+			jobtime VARCHAR(255) DEFAULT NULL,
+			conntime VARCHAR(255) DEFAULT NULL,
+			reason VARCHAR(255) DEFAULT NULL,
+			cidname VARCHAR(255) DEFAULT NULL COMMENT 'SEND: faxname',
+			cidnumber VARCHAR(32) NOT NULL DEFAULT '' COMMENT 'SEND: faxnumber',
+			callid VARCHAR(32) DEFAULT NULL COMMENT 'SEND: empty',
+			owner VARCHAR(255) DEFAULT NULL,
+			dcs VARCHAR(255) DEFAULT NULL,
+			jobinfo VARCHAR(255) DEFAULT NULL COMMENT 'totpages/ntries/ndials/totdials/maxdials/tottries/maxtries',
+			system VARCHAR(24) NOT NULL DEFAULT '' COMMENT 'zPaper: record source host name (part of passed in params)',
+			did VARCHAR(11) NOT NULL DEFAULT '' COMMENT 'zPaper: callid stripped of non-digits prefixed with leading 1 if necessary',
 		);
 		`
 
@@ -167,16 +186,52 @@ func queryfaxrecords(recordtype string) (interface{}, error) {
 
 }
 
-func faxColumnTransfer(tableName string, oldColumnName string, newColumnName string) (string, error) {
-	// Fetch data from source table
-	rows, err := db.Query("SELECT old_column_name FROM source_table")
+func faxColumnTransfer(transferInfo columnTransferInfo) (string, error) {
+	/*
+		// Fetch data from source table
+		rows, err := db.Query("SELECT old_column_name FROM source_table")
+		if err != nil {
+			return "", fmt.Errorf("failed to query source table: %w", err)
+		}
+		defer rows.Close()
+
+		// Prepare insert statement for target table
+		stmt, err := db.Prepare("INSERT INTO target_table (new_column_name) VALUES (?)")
+		if err != nil {
+			return "", fmt.Errorf("failed to prepare insert statement: %w", err)
+		}
+		defer stmt.Close()
+
+		// Process and insert data
+		for rows.Next() {
+			var value string
+			if err := rows.Scan(&value); err != nil {
+				return "", fmt.Errorf("failed to scan row: %w", err)
+			}
+
+			if _, err := stmt.Exec(value); err != nil {
+				return "", fmt.Errorf("failed to insert data into target table: %w", err)
+			}
+		}
+
+		if err := rows.Err(); err != nil {
+			return "", fmt.Errorf("error occurred during rows iteration: %w", err)
+		}
+
+		return "Data transfer completed successfully",
+	*/
+
+	// Fetch data from the source table with dynamic column name
+	query := fmt.Sprintf("SELECT %s FROM %s", transferInfo.originColumn, transferInfo.originTable)
+	rows, err := db.Query(query)
 	if err != nil {
 		return "", fmt.Errorf("failed to query source table: %w", err)
 	}
 	defer rows.Close()
 
-	// Prepare insert statement for target table
-	stmt, err := db.Prepare("INSERT INTO target_table (new_column_name) VALUES (?)")
+	// Prepare insert statement for the target table with dynamic column name
+	insertQuery := fmt.Sprintf("INSERT INTO %s (%s) VALUES (?)", transferInfo.destinationTable, transferInfo.destinationColumn)
+	stmt, err := db.Prepare(insertQuery)
 	if err != nil {
 		return "", fmt.Errorf("failed to prepare insert statement: %w", err)
 	}
