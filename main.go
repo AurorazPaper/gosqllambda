@@ -114,6 +114,13 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 
 	fmt.Println("Table created successfully!")
 
+	var inboundTransferInfo columnTransferInfo
+
+	inboundTransferInfo.originTable = "xferfaxlog"
+	inboundTransferInfo.originColumn = ""
+	inboundTransferInfo.destinationTable = "inboundReportTable"
+	inboundTransferInfo.destinationColumn = ""
+
 	return "Successfully connected to RDS", nil
 
 }
