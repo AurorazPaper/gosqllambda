@@ -14,9 +14,9 @@ import (
 var db *sql.DB
 
 type faxLog struct {
-	datetime string // date from xferfaxlog MM/dd/yy HH:mm, 24 HR clock
-	// entrytype string //SEND,RECV,CALL,POLL,PAGE,UNSENT,SUBMIT,PROXY
-	//commid      string
+	datetime  string // date from xferfaxlog MM/dd/yy HH:mm, 24 HR clock
+	entrytype string //SEND,RECV,CALL,POLL,PAGE,UNSENT,SUBMIT,PROXY
+	commid    string
 	//modem       string
 	qfile string // SEND: jobid
 	// jobtag      string // RECV: NULL
@@ -24,9 +24,9 @@ type faxLog struct {
 	localnumber string // SEND: destnumber
 	tsi         string // SEND: csi
 	// params      string
-	// npages int
+	npages string
 	// jobtime     string
-	// conntime    string
+	conntime string
 	// reason      string
 	cidname   string // SEND: faxname
 	cidnumber string // SEND: faxnumber
@@ -38,6 +38,20 @@ type faxLog struct {
 	// did         string // zPaper: callid stripped of non-digits prefixed with leading 1 if necessary
 }
 
+type inboundColumns struct {
+	starttime    string
+	system       string
+	commid       string
+	FaxFrom      string
+	FaxTo        string
+	Conntime     string
+	npages       string
+	entrytype    string
+	cidname      string
+	tsi          string
+	reason       string
+	receivedfile string
+}
 type GoTestEvent struct {
 	Name string `json:"name"`
 }
@@ -74,7 +88,26 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 	}
 	log.Printf("logs found: %v", faxlogs)
 
+	// Define the SQL statement to create a new table
+	createTableSQL := `
+		CREATE TABLE IF NOT EXISTS inboundReportTable (
+			id INT AUTO_INCREMENT PRIMARY KEY,
+			,
+			email VARCHAR(100),
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
+		`
+
+	// Execute the SQL statement
+	_, err = db.Exec(createTableSQL)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Table created successfully!")
+
 	return "Successfully connected to RDS", nil
+
 }
 
 func main() {
@@ -86,7 +119,7 @@ func main() {
 func queryfaxrecords(recordtype string) (interface{}, error) {
 	var faxlogs []faxLog
 
-	rows, err := db.Query("SELECT datetime, qfile, localnumber, tsi, cidname, cidnumber, jobinfo FROM xferfaxlog WHERE entrytype = ? LIMIT 25", recordtype)
+	rows, err := db.Query("SELECT datetime, qfile, localnumber, tsi, npages, cidname, cidnumber, jobinfo FROM xferfaxlog WHERE entrytype = ? LIMIT 5", recordtype)
 	if err != nil {
 		return nil, fmt.Errorf("queryfaxrecords %q: %v", recordtype, err)
 	}
@@ -103,7 +136,7 @@ func queryfaxrecords(recordtype string) (interface{}, error) {
 		log.cidnumber = ""
 		log.jobinfo = ""
 
-		if err := rows.Scan(&log.datetime, &log.qfile, &log.localnumber, &log.tsi, &log.cidname, &log.cidnumber, &log.jobinfo); err != nil {
+		if err := rows.Scan(&log.datetime, &log.qfile, &log.localnumber, &log.tsi, &log.npages, &log.cidname, &log.cidnumber, &log.jobinfo); err != nil {
 			return nil, fmt.Errorf("queryfaxrecords %q: %v", recordtype, err)
 		}
 		faxlogs = append(faxlogs, log)
@@ -112,5 +145,40 @@ func queryfaxrecords(recordtype string) (interface{}, error) {
 		return nil, fmt.Errorf("queryfaxrecords %q: %v", recordtype, err)
 	}
 	return faxlogs, nil
+
+}
+
+func faxColumnTransfer(tableName string, oldColumnName string, newColumnName string) (string, error) {
+	// Fetch data from source table
+	rows, err := db.Query("SELECT old_column_name FROM source_table")
+	if err != nil {
+		return "", fmt.Errorf("failed to query source table: %w", err)
+	}
+	defer rows.Close()
+
+	// Prepare insert statement for target table
+	stmt, err := db.Prepare("INSERT INTO target_table (new_column_name) VALUES (?)")
+	if err != nil {
+		return "", fmt.Errorf("failed to prepare insert statement: %w", err)
+	}
+	defer stmt.Close()
+
+	// Process and insert data
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return "", fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		if _, err := stmt.Exec(value); err != nil {
+			return "", fmt.Errorf("failed to insert data into target table: %w", err)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("error occurred during rows iteration: %w", err)
+	}
+
+	return "Data transfer completed successfully", nil
 
 }
