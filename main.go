@@ -38,26 +38,28 @@ type faxLog struct {
 	// did         string // zPaper: callid stripped of non-digits prefixed with leading 1 if necessary
 }
 
+
+// struct for columns of the inbound fax report, capitalized 
 type inboundColumns struct {
-	starttime    string
-	system       string
-	commid       string
+	Starttime    string
+	System       string
+	Commid       string
 	FaxFrom      string
 	FaxTo        string
 	Conntime     string
-	npages       string
-	entrytype    string
-	cidname      string
-	tsi          string
-	reason       string
-	receivedfile string
+	Npages       string
+	Entrytype    string
+	Cidname      string
+	Tsi          string
+	Reason       string
+	Receivedfile string
 }
 
 type columnTransferInfo struct {
-	originTable       string
-	originColumn      string
-	destinationTable  string
-	destinationColumn string
+	OriginTable       string
+	OriginColumn      string
+	DestinationTable  string
+	DestinationColumn string
 }
 
 type GoTestEvent struct {
@@ -80,14 +82,14 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 	var err error
 	db, err = sql.Open("mysql", dsn)
 	if err != nil {
-		return "", fmt.Errorf("error connecting to database: %v", err)
+		return "1", fmt.Errorf("error connecting to database: %v", err)
 	}
 	defer db.Close()
 
 	// Test the connection
 	err = db.Ping()
 	if err != nil {
-		return "", fmt.Errorf("error pinging database: %v", err)
+		return "2", fmt.Errorf("error pinging database: %v", err)
 	}
 
 	faxlogs, err := queryfaxrecords("RECV")
@@ -120,8 +122,7 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 			owner VARCHAR(255) DEFAULT NULL,
 			dcs VARCHAR(255) DEFAULT NULL,
 			jobinfo VARCHAR(255) DEFAULT NULL COMMENT 'totpages/ntries/ndials/totdials/maxdials/tottries/maxtries',
-			system VARCHAR(24) NOT NULL DEFAULT '' COMMENT 'zPaper: record source host name (part of passed in params)',
-			did VARCHAR(11) NOT NULL DEFAULT '' COMMENT 'zPaper: callid stripped of non-digits prefixed with leading 1 if necessary',
+			did VARCHAR(11) NOT NULL DEFAULT '' COMMENT 'zPaper: callid stripped of non-digits prefixed with leading 1 if necessary'
 		);
 		`
 
@@ -135,10 +136,14 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 
 	var inboundTransferInfo columnTransferInfo
 
-	inboundTransferInfo.originTable = "xferfaxlog"
-	inboundTransferInfo.originColumn = ""
-	inboundTransferInfo.destinationTable = "inboundReportTable"
-	inboundTransferInfo.destinationColumn = ""
+	inboundTransferInfo.OriginTable = "xferfaxlog"
+	inboundTransferInfo.OriginColumn = "datetime"
+	inboundTransferInfo.DestinationTable = "inboundReportTable"
+	inboundTransferInfo.DestinationColumn = "starttime"
+
+	
+
+	faxColumnTransfer(inboundTransferInfo)
 
 	return "Successfully connected to RDS", nil
 
@@ -187,72 +192,38 @@ func queryfaxrecords(recordtype string) (interface{}, error) {
 }
 
 func faxColumnTransfer(transferInfo columnTransferInfo) (string, error) {
-	/*
-		// Fetch data from source table
-		rows, err := db.Query("SELECT old_column_name FROM source_table")
-		if err != nil {
-			return "", fmt.Errorf("failed to query source table: %w", err)
-		}
-		defer rows.Close()
-
-		// Prepare insert statement for target table
-		stmt, err := db.Prepare("INSERT INTO target_table (new_column_name) VALUES (?)")
-		if err != nil {
-			return "", fmt.Errorf("failed to prepare insert statement: %w", err)
-		}
-		defer stmt.Close()
-
-		// Process and insert data
-		for rows.Next() {
-			var value string
-			if err := rows.Scan(&value); err != nil {
-				return "", fmt.Errorf("failed to scan row: %w", err)
-			}
-
-			if _, err := stmt.Exec(value); err != nil {
-				return "", fmt.Errorf("failed to insert data into target table: %w", err)
-			}
-		}
-
-		if err := rows.Err(); err != nil {
-			return "", fmt.Errorf("error occurred during rows iteration: %w", err)
-		}
-
-		return "Data transfer completed successfully",
-	*/
-
 	// Fetch data from the source table with dynamic column name
-	query := fmt.Sprintf("SELECT %s FROM %s", transferInfo.originColumn, transferInfo.originTable)
+	query := fmt.Sprintf("SELECT %s FROM %s LIMIT 2000", transferInfo.OriginColumn, transferInfo.OriginTable)
 	rows, err := db.Query(query)
 	if err != nil {
-		return "", fmt.Errorf("failed to query source table: %w", err)
+		return "3", fmt.Errorf("failed to query source table: %w", err)
 	}
 	defer rows.Close()
 
 	// Prepare insert statement for the target table with dynamic column name
-	insertQuery := fmt.Sprintf("INSERT INTO %s (%s) VALUES (?)", transferInfo.destinationTable, transferInfo.destinationColumn)
+	insertQuery := fmt.Sprintf("INSERT INTO %s (%s) VALUES (?)", transferInfo.DestinationTable, transferInfo.DestinationColumn)
 	stmt, err := db.Prepare(insertQuery)
 	if err != nil {
-		return "", fmt.Errorf("failed to prepare insert statement: %w", err)
+		return "4", fmt.Errorf("failed to prepare insert statement: %w", err)
 	}
 	defer stmt.Close()
 
 	// Process and insert data
 	for rows.Next() {
-		var value string
+		var value interface{}
 		if err := rows.Scan(&value); err != nil {
-			return "", fmt.Errorf("failed to scan row: %w", err)
+			return "5", fmt.Errorf("failed to scan row: %w", err)
 		}
 
+		// Convert the value to a type that can be used with Exec
 		if _, err := stmt.Exec(value); err != nil {
-			return "", fmt.Errorf("failed to insert data into target table: %w", err)
+			return "6", fmt.Errorf("failed to insert data into target table: %w", err)
 		}
 	}
 
 	if err := rows.Err(); err != nil {
-		return "", fmt.Errorf("error occurred during rows iteration: %w", err)
+		return "7", fmt.Errorf("error occurred during rows iteration: %w", err)
 	}
 
 	return "Data transfer completed successfully", nil
-
 }
