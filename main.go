@@ -38,8 +38,7 @@ type faxLog struct {
 	// did         string // zPaper: callid stripped of non-digits prefixed with leading 1 if necessary
 }
 
-
-// struct for columns of the inbound fax report, capitalized 
+// struct for columns of the inbound fax report, capitalized
 type inboundColumns struct {
 	Starttime    string
 	System       string
@@ -98,6 +97,13 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 	}
 	log.Printf("logs found: %v", faxlogs)
 
+	addidmessage, err := addID(db)
+	if err != nil {
+		fmt.Println("Failure to add id column:", err)
+	} else {
+		fmt.Println(addidmessage)
+	}
+
 	// Define the SQL statement to create a new table
 	createTableSQL := `
 		CREATE TABLE IF NOT EXISTS inboundReportTable (
@@ -140,8 +146,6 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 	inboundTransferInfo.OriginColumn = "datetime"
 	inboundTransferInfo.DestinationTable = "inboundReportTable"
 	inboundTransferInfo.DestinationColumn = "starttime"
-
-	
 
 	faxColumnTransfer(inboundTransferInfo)
 
@@ -225,5 +229,16 @@ func faxColumnTransfer(transferInfo columnTransferInfo) (string, error) {
 		return "7", fmt.Errorf("error occurred during rows iteration: %w", err)
 	}
 
-	return "Data transfer completed successfully", nil
+	return "Data transfer successful", nil
+}
+
+func addID(db *sql.DB) (string, error) {
+	createIDColumn := `ALTER TABLE xferfaxlog ADD COLUMN id INT AUTO_INCREMENT PRIMARY KEY FIRST;`
+
+	_, err := db.Exec(createIDColumn)
+	if err != nil {
+		return "", fmt.Errorf("could not create id column: %w", err)
+	}
+
+	return "ID column creation successful", nil
 }
