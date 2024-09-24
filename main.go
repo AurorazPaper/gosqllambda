@@ -97,11 +97,11 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 	}
 	log.Printf("logs found: %v", faxlogs)
 
-	addidmessage, err := addID(db)
+	missedcallColumn, err := processMissedcalls(db)
 	if err != nil {
-		fmt.Println("Failure to add id column:", err)
+		fmt.Println("Failure to add missedCalls column:", err)
 	} else {
-		fmt.Println(addidmessage)
+		fmt.Println(missedcallColumn)
 	}
 
 	// Define the SQL statement to create a new table
@@ -147,7 +147,7 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 	inboundTransferInfo.DestinationTable = "inboundReportTable"
 	inboundTransferInfo.DestinationColumn = "starttime"
 
-	faxColumnTransfer(inboundTransferInfo)
+	// faxColumnTransfer(inboundTransferInfo)
 
 	return "Successfully connected to RDS", nil
 
@@ -195,6 +195,7 @@ func queryfaxrecords(recordtype string) (interface{}, error) {
 
 }
 
+/*
 func faxColumnTransfer(transferInfo columnTransferInfo) (string, error) {
 	// Fetch data from the source table with dynamic column name
 	query := fmt.Sprintf("SELECT %s FROM %s LIMIT 2000", transferInfo.OriginColumn, transferInfo.OriginTable)
@@ -231,14 +232,25 @@ func faxColumnTransfer(transferInfo columnTransferInfo) (string, error) {
 
 	return "Data transfer successful", nil
 }
+*/
 
-func addID(db *sql.DB) (string, error) {
-	createIDColumn := `ALTER TABLE xferfaxlog ADD COLUMN id INT AUTO_INCREMENT PRIMARY KEY FIRST;`
+// Processes Call entries, categorizes them as missed or not missed
+func processMissedcalls(db *sql.DB) (string, error) {
+	createCallMissedColumn :=
+		`UPDATE xferfaxlog
+		SET callMissed = CASE
+			WHEN entrytype = 'CALL' AND (other_column IS NOT NULL AND other_column != '') THEN TRUE
+			WHEN entrytype = 'CALL' AND (reason IS NULL OR reason = '') THEN FALSE
+			ELSE callMissed  -- Retain current value if conditions are not met
+		END
+		WHERE entrytype = 'CALL' AND callMissed IS NULL;  -- Limit to NULL values
+		`
 
-	_, err := db.Exec(createIDColumn)
+	_, err := db.Exec(createCallMissedColumn)
 	if err != nil {
-		return "", fmt.Errorf("could not create id column: %w", err)
+		return "", fmt.Errorf("could not create callMissed column: %w", err)
 	}
 
-	return "ID column creation successful", nil
+	return "callMissed column creation successful", nil
+
 }

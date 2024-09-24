@@ -1,1 +1,1 @@
-{"errorType":"Runtime.ExitError","errorMessage":"RequestId: ae81013e-9e24-42f1-b76e-c33e96a1e3c5 Error: Runtime exited with error: exit status 1"}
+{"errorType":"Runtime.InvalidEntrypoint","errorMessage":"RequestId: eb3719b6-3d94-41ed-9b2b-d0cd7d34718b Error: fork/exec /var/task/bootstrap: exec format error"}
