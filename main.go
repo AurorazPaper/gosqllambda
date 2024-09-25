@@ -166,7 +166,7 @@ func processNextSuccess(db *sql.DB) (string, error) {
 			LIMIT 1
 		)
 		WHERE missed.callMissed = 1 AND nextSuccess IS NULL
-		LIMIT 500;
+		LIMIT 250;
 	`
 
 	startTime := time.Now()
@@ -222,10 +222,10 @@ func missedCallDiff(db *sql.DB) (string, error) {
 			WHERE next.localnumber = missed.localnumber
 			AND next.cidname = missed.cidname
 			AND next.datetime > missed.datetime
-			ORDER BY next.datetime DESC
+			ORDER BY next.datetime ASC
 			LIMIT 1
 		)
-		WHERE missed.callMissed = 1 AND nextSuccess IS NULL
+		WHERE missed.callMissed = 1 AND retrytime IS NULL
 		LIMIT 250;
 		`
 	startTime := time.Now()
