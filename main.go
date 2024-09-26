@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-lambda-go/lambda"
@@ -77,38 +78,41 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 		log.Printf("logs found: %v", faxlogs)
 	*/
 
-	// categorizes calls as missed or not missed
-	missedcallColumn, err := processMissedcalls(db)
-	if err != nil {
-		fmt.Println("Failure to process missed calls:", err)
-	} else {
-		fmt.Println(missedcallColumn)
-	}
+	var wg sync.WaitGroup
 
-	// categorizes fax as complete or incomplete
-	faxprocess, err := processIncompleteFax(db)
-	if err != nil {
-		fmt.Println("Failure to process incomplete faxes:", err)
-	} else {
-		fmt.Println(faxprocess)
-	}
+	wg.Add(3)
 
-	// gets the ID of the next successful call, writes it to a column for the original missed entry
-	successProcess, err := processNextSuccess(db)
-	if err != nil {
-		fmt.Println("Failure to process next success logic:", err)
-	} else {
-		fmt.Println(successProcess)
-	}
+	go func() {
+		defer wg.Done()
+		if _, err := processMissedcalls(db); err != nil {
+			log.Println("Failure to process missed calls:", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if _, err := processIncompleteFax(db); err != nil {
+			log.Println("Failure to process incomplete faxes:", err)
+		}
+	}()
+	/*
+		go func() {
+			defer wg.Done()
+			if _, err := processNextSuccess(db); err != nil {
+				log.Println("Failure to process next success logic:", err)
+			}
+		}()
+	*/
+	go func() {
+		defer wg.Done()
+		if _, err := missedCallDiff(db); err != nil {
+			log.Println("Failure to process call difference logic:", err)
+		}
+	}()
+	
 
-	// gets the ID of the next successful call, writes it to a column for the original missed entry
-	callDiff, err := missedCallDiff(db)
-	if err != nil {
-		fmt.Println("Failure to process next success logic:", err)
-	} else {
-		fmt.Println(callDiff)
-	}
+	wg.Wait()
 
+	defer db.Close()
 	return "Successfully connected to RDS", nil
 
 }
