@@ -70,6 +70,12 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 		return "2", fmt.Errorf("error pinging database: %v", err)
 	}
 
+	if err := createMissedFaxLogTable(db); err != nil {
+		fmt.Printf("Error creating table: %s\n", err)
+	} else {
+		fmt.Println("missed_faxlog table created or already exists.")
+	}
+
 	/*
 		faxlogs, err := queryfaxrecords("RECV")
 		if err != nil {
@@ -80,7 +86,7 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 
 	var wg sync.WaitGroup
 
-	wg.Add(3)
+	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
@@ -88,12 +94,12 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 			log.Println("Failure to process missed calls:", err)
 		}
 	}()
-	go func() {
+	/*go func() {
 		defer wg.Done()
 		if _, err := processIncompleteFax(db); err != nil {
 			log.Println("Failure to process incomplete faxes:", err)
 		}
-	}()
+	}()*/
 	/*
 		go func() {
 			defer wg.Done()
@@ -108,7 +114,6 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 			log.Println("Failure to process call difference logic:", err)
 		}
 	}()
-	
 
 	wg.Wait()
 
@@ -222,15 +227,27 @@ func missedCallDiff(db *sql.DB) (string, error) {
 				SELECT id, localnumber, cidname, datetime
 				FROM xferfaxlog
 				WHERE callMissed = 0
+				ORDER BY datetime
 			) AS next
 			WHERE next.localnumber = missed.localnumber
 			AND next.cidname = missed.cidname
 			AND next.datetime > missed.datetime
-			ORDER BY next.datetime ASC
 			LIMIT 1
 		)
-		WHERE missed.callMissed = 1 AND retrytime IS NULL
-		LIMIT 250;
+		WHERE missed.callMissed = 1 
+		AND missed.retrytime IS NULL
+		AND EXISTS (
+			SELECT 1
+			FROM (
+				SELECT id, localnumber, cidname, datetime
+				FROM xferfaxlog
+				WHERE callMissed = 0
+			) AS next
+			WHERE next.localnumber = missed.localnumber
+			AND next.cidname = missed.cidname
+			AND next.datetime > missed.datetime
+		)
+		LIMIT 100;
 		`
 	startTime := time.Now()
 	if _, err := db.Exec(getMissDiff); err != nil {
@@ -240,4 +257,28 @@ func missedCallDiff(db *sql.DB) (string, error) {
 	log.Printf("call difference logic executed in %s", duration)
 
 	return "call difference processing successful", nil
+}
+
+func createMissedFaxLogTable(db *sql.DB) error {
+	createTableSQL := `
+    CREATE TABLE IF NOT EXISTS missed_faxlog (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        xferfaxlog_id INT NOT NULL,
+        localnumber VARCHAR(255),
+        cidname VARCHAR(255),
+        datetime DATETIME,
+        retrytime INT,
+        FOREIGN KEY (xferfaxlog_id) REFERENCES xferfaxlog(id) ON DELETE CASCADE,
+        INDEX (localnumber),
+        INDEX (cidname),
+        INDEX (datetime)
+    );`
+
+	// Execute the create table statement
+	_, err := db.Exec(createTableSQL)
+	if err != nil {
+		return fmt.Errorf("could not create missed_faxlog table: %w", err)
+	}
+
+	return nil
 }
