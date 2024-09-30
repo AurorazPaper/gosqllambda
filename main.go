@@ -216,69 +216,42 @@ func processIncompleteFax(db *sql.DB) (string, error) {
 	return "incomplete fax processing successful", nil
 
 }
-
 func missedCallDiff(db *sql.DB) (string, error) {
-	// Gets the ID of the next successful fax between two phone numbers
-	getMissDiff := `
-		UPDATE xferfaxlog AS missed
-		SET retrytime = (
-			SELECT TIMESTAMPDIFF(MINUTE, missed.datetime, next.datetime)
-			FROM (
-				SELECT id, localnumber, cidname, datetime
-				FROM xferfaxlog
-				WHERE callMissed = 0
-				ORDER BY datetime
-			) AS next
-			WHERE next.localnumber = missed.localnumber
-			AND next.cidname = missed.cidname
-			AND next.datetime > missed.datetime
-			LIMIT 1
-		)
-		WHERE missed.callMissed = 1 
-		AND missed.retrytime IS NULL
-		AND EXISTS (
-			SELECT 1
-			FROM (
-				SELECT id, localnumber, cidname, datetime
-				FROM xferfaxlog
-				WHERE callMissed = 0
-			) AS next
-			WHERE next.localnumber = missed.localnumber
-			AND next.cidname = missed.cidname
-			AND next.datetime > missed.datetime
-		)
-		LIMIT 100;
-		`
-	startTime := time.Now()
-	if _, err := db.Exec(getMissDiff); err != nil {
-		return "", fmt.Errorf("could not run next missed call difference logic: %w", err)
-	}
-	duration := time.Since(startTime)
-	log.Printf("call difference logic executed in %s", duration)
+	insertMissedCalls := `
+        INSERT INTO missed_faxlog (xferfaxlog_id, localnumber, cidname, retrytime)
+        SELECT 
+            missed.xferfaxlog_id,
+            missed.localnumber,
+            missed.cidname,
+            TIMESTAMPDIFF(MINUTE, missed.datetime, next.datetime) AS retrytime
+        FROM 
+            xferfaxlog AS missed
+        JOIN 
+            xferfaxlog AS next ON missed.localnumber = next.localnumber
+            AND missed.cidname = next.cidname
+            AND next.datetime > missed.datetime
+        WHERE 
+            missed.callMissed = 1
+            AND next.callMissed = 0
+        ORDER BY 
+            missed.datetime DESC;
+    `
 
-	return "call difference processing successful", nil
-}
-
-func createMissedFaxLogTable(db *sql.DB) error {
-	createTableSQL := `
-    CREATE TABLE IF NOT EXISTS missed_faxlog (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        xferfaxlog_id INT NOT NULL,
-        localnumber VARCHAR(255),
-        cidname VARCHAR(255),
-        datetime DATETIME,
-        retrytime INT,
-        FOREIGN KEY (xferfaxlog_id) REFERENCES xferfaxlog(id) ON DELETE CASCADE,
-        INDEX (localnumber),
-        INDEX (cidname),
-        INDEX (datetime)
-    );`
-
-	// Execute the create table statement
-	_, err := db.Exec(createTableSQL)
+	// Execute the insert query
+	result, err := db.Exec(insertMissedCalls)
 	if err != nil {
-		return fmt.Errorf("could not create missed_faxlog table: %w", err)
+		return "", fmt.Errorf("could not insert missed calls into missed_faxlog: %w", err)
 	}
 
-	return nil
+	// Check affected rows
+	affectedRows, err := result.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+
+	if affectedRows == 0 {
+		return "No rows were inserted into missed_faxlog. Please check the data.", nil
+	}
+
+	return fmt.Sprintf("%d rows inserted into missed_faxlog", affectedRows), nil
 }
