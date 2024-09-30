@@ -132,18 +132,19 @@ func main() {
 func processMissedcalls(db *sql.DB) (string, error) {
 	updateCallMissed :=
 		`UPDATE xferfaxlog
-		SET callMissed = CASE
-			WHEN entrytype = 'CALL' AND (reason IS NOT NULL AND reason != '') THEN 1
-			WHEN entrytype = 'CALL' AND (reason IS NULL OR reason = '') THEN 0
-			ELSE callMissed
-		END
+		SET callMissed = 
+			CASE
+				WHEN entrytype = 'CALL' AND (reason IS NOT NULL AND reason != '') THEN 1
+				WHEN entrytype = 'CALL' AND (reason IS NULL OR reason = '') THEN 0
+				ELSE callMissed
+			END
 		WHERE id IN (
-			SELECT id
-			FROM (
+			SELECT id FROM (
 				SELECT id
 				FROM xferfaxlog
 				WHERE entrytype = 'CALL' AND callMissed IS NULL
-				ORDER BY datetime DESC  
+				ORDER BY datetime DESC
+				LIMIT 5000
 			) AS subquery
 		);
 		`
@@ -191,21 +192,30 @@ func processNextSuccess(db *sql.DB) (string, error) {
 // Processes Call entries, categorizes them as missed or not missed
 func processIncompleteFax(db *sql.DB) (string, error) {
 	updateCallMissed :=
-		`UPDATE xferfaxlog
-		SET faxincomplete = CASE
-			WHEN entrytype = 'RECV' AND (reason IS NOT NULL AND reason != '') THEN 1
-			WHEN entrytype = 'RECV' AND (reason IS NULL OR reason = '') THEN 0
-			ELSE callMissed
-		END
-		WHERE id IN (
-			SELECT id
-			FROM (
-				SELECT id
-				FROM xferfaxlog
-				WHERE entrytype = 'RECV' AND faxincomplete IS NULL
-				ORDER BY datetime DESC  
-			) AS subquery
-		);
+		`INSERT INTO missed_faxlog (xferfaxlog_id, localnumber, cidname, retrytime)
+		SELECT
+			missed.id AS xferfaxlog_id,
+			missed.localnumber,
+			missed.cidname,
+			IF(next.datetime IS NULL, 360,
+			LEAST(TIMESTAMPDIFF(MINUTE, missed.datetime, next.datetime), 360)) AS retrytime
+		FROM
+			xferfaxlog AS missed
+		LEFT JOIN
+			xferfaxlog AS next ON missed.localnumber = next.localnumber
+			AND missed.cidname = next.cidname
+			AND next.datetime > missed.datetime
+			AND next.datetime <= DATE_ADD(missed.datetime, INTERVAL 360 MINUTE)
+			AND next.callMissed = 0
+		WHERE
+			missed.callMissed = 1
+			AND NOT EXISTS (
+				SELECT 1 FROM missed_faxlog 
+				WHERE xferfaxlog_id = missed.id
+			)
+		ORDER BY
+			missed.datetime DESC
+		LIMIT 2500;
 		`
 
 	_, err := db.Exec(updateCallMissed)
@@ -218,24 +228,28 @@ func processIncompleteFax(db *sql.DB) (string, error) {
 }
 func missedCallDiff(db *sql.DB) (string, error) {
 	insertMissedCalls := `
-        INSERT INTO missed_faxlog (xferfaxlog_id, localnumber, cidname, retrytime)
-        SELECT 
-            missed.xferfaxlog_id,
-            missed.localnumber,
-            missed.cidname,
-            TIMESTAMPDIFF(MINUTE, missed.datetime, next.datetime) AS retrytime
-        FROM 
-            xferfaxlog AS missed
-        JOIN 
-            xferfaxlog AS next ON missed.localnumber = next.localnumber
-            AND missed.cidname = next.cidname
-            AND next.datetime > missed.datetime
-        WHERE 
-            missed.callMissed = 1
-            AND next.callMissed = 0
-        ORDER BY 
-            missed.datetime DESC;
-    `
+        INSERT INTO missed_faxlog (id, localnumber, cidname, retrytime)
+		SELECT
+			missed.id,
+			missed.localnumber,
+			missed.cidname,
+			IF(next.datetime IS NULL, 360,
+			LEAST(TIMESTAMPDIFF(MINUTE, missed.datetime, next.datetime), 360)) AS retrytime
+		FROM
+			(SELECT id, localnumber, cidname, datetime
+			FROM xferfaxlog
+			WHERE callMissed = 1
+			ORDER BY datetime DESC
+			LIMIT 2500) AS missed
+		LEFT JOIN
+			xferfaxlog AS next ON missed.localnumber = next.localnumber
+			AND missed.cidname = next.cidname
+			AND next.datetime > missed.datetime
+			AND next.datetime <= DATE_ADD(missed.datetime, INTERVAL 360 MINUTE)
+			AND next.callMissed = 0
+		ORDER BY
+			missed.datetime DESC;
+			`
 
 	// Execute the insert query
 	result, err := db.Exec(insertMissedCalls)
