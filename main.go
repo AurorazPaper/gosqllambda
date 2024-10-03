@@ -131,7 +131,7 @@ func main() {
 // Processes Call entries, categorizes them as missed or not missed
 func processMissedcalls(db *sql.DB) (string, error) {
 	updateCallMissed :=
-		`UPDATE xferfaxlog
+		`UPDATE theBigTable
 		SET callMissed = CASE
 			WHEN entrytype = 'CALL' AND (reason IS NOT NULL AND reason != '') THEN 1
 			WHEN entrytype = 'CALL' AND (reason IS NULL OR reason = '') THEN 0
@@ -220,12 +220,12 @@ func processIncompleteFax(db *sql.DB) (string, error) {
 func missedCallDiff(db *sql.DB) (string, error) {
 	// Gets the ID of the next successful fax between two phone numbers
 	getMissDiff := `
-		UPDATE xferfaxlog AS missed
+		UPDATE theBigTableAS missed
 		SET retrytime = (
 			SELECT TIMESTAMPDIFF(MINUTE, missed.datetime, next.datetime)
 			FROM (
 				SELECT id, localnumber, cidname, datetime
-				FROM xferfaxlog
+				FROM theBigTable
 				WHERE callMissed = 0
 				ORDER BY datetime
 			) AS next
@@ -247,7 +247,7 @@ func missedCallDiff(db *sql.DB) (string, error) {
 			AND next.cidname = missed.cidname
 			AND next.datetime > missed.datetime
 		)
-		LIMIT 100;
+		LIMIT 1;
 		`
 	startTime := time.Now()
 	if _, err := db.Exec(getMissDiff); err != nil {
