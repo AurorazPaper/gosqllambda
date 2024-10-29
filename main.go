@@ -15,36 +15,11 @@ import (
 
 var db *sql.DB
 
-type faxLog struct {
-	datetime  string // date from xferfaxlog MM/dd/yy HH:mm, 24 HR clock
-	entrytype string //SEND,RECV,CALL,POLL,PAGE,UNSENT,SUBMIT,PROXY
-	commid    string
-	//modem       string
-	qfile string // SEND: jobid
-	// jobtag      string // RECV: NULL
-	// sender      string // The sender/receiver electronic mailing address (facsimile receptions are always attributed to the "fax" user).
-	localnumber string // SEND: destnumber
-	tsi         string // SEND: csi
-	// params      string
-	npages string
-	// jobtime     string
-	conntime string
-	// reason      string
-	cidname   string // SEND: faxname
-	cidnumber string // SEND: faxnumber
-	// callid      string // SEND: empty
-	// owner       string
-	// dcs         string
-	jobinfo string // totpages/ntries/ndials/totdials/maxdials/tottries/maxtries
-	system  string // zPaper: record source host name (part of passed in params)
-	// did         string // zPaper: callid stripped of non-digits prefixed with leading 1 if necessary
-}
-
-type GoTestEvent struct {
+type goLogicEvent struct {
 	Name string `json:"name"`
 }
 
-func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
+func handleRequest(ctx context.Context, event goLogicEvent) (string, error) {
 
 	// Retrieve environment variables from Lambda config
 	rdsHost := os.Getenv("RDS_HOST")
@@ -76,38 +51,20 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 		fmt.Println("missed_faxlog table created or already exists.")
 	}
 
-	/*
-		faxlogs, err := queryfaxrecords("RECV")
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("logs found: %v", faxlogs)
-	*/
-
+	// sync is go's version of async - handles concurrency
 	var wg sync.WaitGroup
 
+	// adds 2 functions to the waitgroup,
 	wg.Add(2)
-
+	// sorts all CALL entries into missed or not missed
 	go func() {
 		defer wg.Done()
 		if _, err := processMissedcalls(db); err != nil {
 			log.Println("Failure to process missed calls:", err)
 		}
 	}()
-	/*go func() {
-		defer wg.Done()
-		if _, err := processIncompleteFax(db); err != nil {
-			log.Println("Failure to process incomplete faxes:", err)
-		}
-	}()*/
-	/*
-		go func() {
-			defer wg.Done()
-			if _, err := processNextSuccess(db); err != nil {
-				log.Println("Failure to process next success logic:", err)
-			}
-		}()
-	*/
+	// grabs difference between missed call and the next successful call
+	// writes to retrytime column
 	go func() {
 		defer wg.Done()
 		if _, err := missedCallDiff(db); err != nil {
@@ -118,13 +75,13 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 	wg.Wait()
 
 	defer db.Close()
-	return "Successfully connected to RDS", nil
+	return "Go functions run successfully", nil
 
 }
 
 func main() {
 
-	lambda.Start(HandleRequestTest)
+	lambda.Start(handleRequest)
 
 }
 
@@ -157,97 +114,26 @@ func processMissedcalls(db *sql.DB) (string, error) {
 
 }
 
-func processNextSuccess(db *sql.DB) (string, error) {
-	// Gets the ID of the next successful fax between two phone numbers
-	updateNextSuccess := `
-		UPDATE xferfaxlog AS missed
-		SET nextSuccess = (
-			SELECT next.id
-			FROM (
-				SELECT id, localnumber, cidname, datetime
-				FROM xferfaxlog
-				WHERE callMissed = 0
-			) AS next
-			WHERE next.localnumber = missed.localnumber
-			AND next.cidname = missed.cidname
-			AND next.datetime > missed.datetime
-			ORDER BY next.datetime ASC
-			LIMIT 1
-		)
-		WHERE missed.callMissed = 1 AND nextSuccess IS NULL
-		LIMIT 250;
-	`
-
-	startTime := time.Now()
-	if _, err := db.Exec(updateNextSuccess); err != nil {
-		return "", fmt.Errorf("could not run next success logic: %w", err)
-	}
-	duration := time.Since(startTime)
-	log.Printf("Next success logic executed in %s", duration)
-
-	return "Next success processing successful", nil
-}
-
-// Processes Call entries, categorizes them as missed or not missed
-func processIncompleteFax(db *sql.DB) (string, error) {
-	updateCallMissed :=
-		`UPDATE xferfaxlog
-		SET faxincomplete = CASE
-			WHEN entrytype = 'RECV' AND (reason IS NOT NULL AND reason != '') THEN 1
-			WHEN entrytype = 'RECV' AND (reason IS NULL OR reason = '') THEN 0
-			ELSE callMissed
-		END
-		WHERE id IN (
-			SELECT id
-			FROM (
-				SELECT id
-				FROM xferfaxlog
-				WHERE entrytype = 'RECV' AND faxincomplete IS NULL
-				ORDER BY datetime DESC  
-			) AS subquery
-		);
-		`
-
-	_, err := db.Exec(updateCallMissed)
-	if err != nil {
-		return "", fmt.Errorf("could not run incomplete fax logic: %w", err)
-	}
-
-	return "incomplete fax processing successful", nil
-
-}
-
 func missedCallDiff(db *sql.DB) (string, error) {
 	// Gets the ID of the next successful fax between two phone numbers
 	getMissDiff := `
-		UPDATE theBigTableAS missed
-		SET retrytime = (
-			SELECT TIMESTAMPDIFF(MINUTE, missed.datetime, next.datetime)
-			FROM (
-				SELECT id, localnumber, cidname, datetime
-				FROM theBigTable
-				WHERE callMissed = 0
-				ORDER BY datetime
-			) AS next
-			WHERE next.localnumber = missed.localnumber
-			AND next.cidname = missed.cidname
-			AND next.datetime > missed.datetime
-			LIMIT 1
-		)
-		WHERE missed.callMissed = 1 
-		AND missed.retrytime IS NULL
-		AND EXISTS (
-			SELECT 1
-			FROM (
-				SELECT id, localnumber, cidname, datetime
-				FROM xferfaxlog
-				WHERE callMissed = 0
-			) AS next
-			WHERE next.localnumber = missed.localnumber
-			AND next.cidname = missed.cidname
-			AND next.datetime > missed.datetime
-		)
-		LIMIT 1;
+		UPDATE theBigTable base
+		INNER JOIN (
+			SELECT missed.id, 
+				TIMESTAMPDIFF(MINUTE, missed.datetime, MIN(next.datetime)) as retry_mins
+			FROM theBigTable missed
+			INNER JOIN theBigTable next ON 
+				next.localnumber = missed.localnumber AND 
+				next.cidname = missed.cidname AND
+				next.datetime > missed.datetime AND
+				next.callMissed = 0
+			WHERE missed.callMissed = 1
+			AND missed.retrytime IS NULL
+			GROUP BY missed.id, missed.datetime
+			LIMIT 10000
+		) AS next_calls ON base.id = next_calls.id
+		SET base.retrytime = LEAST(next_calls.retry_mins, 360)
+		WHERE base.retrytime IS NULL;
 		`
 	startTime := time.Now()
 	if _, err := db.Exec(getMissDiff); err != nil {
