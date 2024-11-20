@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/aws/aws-lambda-go/lambda"
 	_ "github.com/go-sql-driver/mysql"
@@ -131,37 +130,6 @@ func processMissedcalls(db *sql.DB) (string, error) {
 
 	return "callMissed column creation successful", nil
 
-}
-
-func processNextSuccess(db *sql.DB) (string, error) {
-	// Gets the ID of the next successful fax between two phone numbers
-	updateNextSuccess := `
-		UPDATE xferfaxlog AS missed
-		SET nextSuccess = (
-			SELECT next.id
-			FROM (
-				SELECT id, localnumber, cidname, datetime
-				FROM xferfaxlog
-				WHERE callMissed = 0
-			) AS next
-			WHERE next.localnumber = missed.localnumber
-			AND next.cidname = missed.cidname
-			AND next.datetime > missed.datetime
-			ORDER BY next.datetime ASC
-			LIMIT 1
-		)
-		WHERE missed.callMissed = 1 AND nextSuccess IS NULL
-		LIMIT 250;
-	`
-
-	startTime := time.Now()
-	if _, err := db.Exec(updateNextSuccess); err != nil {
-		return "", fmt.Errorf("could not run next success logic: %w", err)
-	}
-	duration := time.Since(startTime)
-	log.Printf("Next success logic executed in %s", duration)
-
-	return "Next success processing successful", nil
 }
 
 // Processes Call entries, categorizes them as missed or not missed
