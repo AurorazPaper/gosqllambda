@@ -15,31 +15,6 @@ import (
 
 var db *sql.DB
 
-type faxLog struct {
-	datetime  string // date from xferfaxlog MM/dd/yy HH:mm, 24 HR clock
-	entrytype string //SEND,RECV,CALL,POLL,PAGE,UNSENT,SUBMIT,PROXY
-	commid    string
-	//modem       string
-	qfile string // SEND: jobid
-	// jobtag      string // RECV: NULL
-	// sender      string // The sender/receiver electronic mailing address (facsimile receptions are always attributed to the "fax" user).
-	localnumber string // SEND: destnumber
-	tsi         string // SEND: csi
-	// params      string
-	npages string
-	// jobtime     string
-	conntime string
-	// reason      string
-	cidname   string // SEND: faxname
-	cidnumber string // SEND: faxnumber
-	// callid      string // SEND: empty
-	// owner       string
-	// dcs         string
-	jobinfo string // totpages/ntries/ndials/totdials/maxdials/tottries/maxtries
-	system  string // zPaper: record source host name (part of passed in params)
-	// did         string // zPaper: callid stripped of non-digits prefixed with leading 1 if necessary
-}
-
 type GoTestEvent struct {
 	Name string `json:"name"`
 }
@@ -94,12 +69,12 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 			log.Println("Failure to process missed calls:", err)
 		}
 	}()
-	/*go func() {
+	go func() {
 		defer wg.Done()
 		if _, err := processIncompleteFax(db); err != nil {
 			log.Println("Failure to process incomplete faxes:", err)
 		}
-	}()*/
+	}()
 	/*
 		go func() {
 			defer wg.Done()
@@ -192,30 +167,10 @@ func processNextSuccess(db *sql.DB) (string, error) {
 // Processes Call entries, categorizes them as missed or not missed
 func processIncompleteFax(db *sql.DB) (string, error) {
 	updateCallMissed :=
-		`INSERT INTO missed_faxlog (xferfaxlog_id, localnumber, cidname, retrytime)
-		SELECT
-			missed.id AS xferfaxlog_id,
-			missed.localnumber,
-			missed.cidname,
-			IF(next.datetime IS NULL, 360,
-			LEAST(TIMESTAMPDIFF(MINUTE, missed.datetime, next.datetime), 360)) AS retrytime
-		FROM
-			xferfaxlog AS missed
-		LEFT JOIN
-			xferfaxlog AS next ON missed.localnumber = next.localnumber
-			AND missed.cidname = next.cidname
-			AND next.datetime > missed.datetime
-			AND next.datetime <= DATE_ADD(missed.datetime, INTERVAL 360 MINUTE)
-			AND next.callMissed = 0
-		WHERE
-			missed.callMissed = 1
-			AND NOT EXISTS (
-				SELECT 1 FROM missed_faxlog 
-				WHERE xferfaxlog_id = missed.id
-			)
-		ORDER BY
-			missed.datetime DESC
-		LIMIT 2500;
+		`UPDATE xferfaxlog AS missed
+		SET faxincomplete = incomplete
+		WHERE npages != 0
+  			AND column2 IS NOT NULL;
 		`
 
 	_, err := db.Exec(updateCallMissed)
