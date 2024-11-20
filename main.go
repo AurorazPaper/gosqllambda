@@ -50,14 +50,6 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 		fmt.Println("missed_faxlog table created or already exists.")
 	}
 
-	/*
-		faxlogs, err := queryfaxrecords("RECV")
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("logs found: %v", faxlogs)
-	*/
-
 	var wg sync.WaitGroup
 
 	wg.Add(2)
@@ -74,14 +66,6 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 			log.Println("Failure to process incomplete faxes:", err)
 		}
 	}()
-	/*
-		go func() {
-			defer wg.Done()
-			if _, err := processNextSuccess(db); err != nil {
-				log.Println("Failure to process next success logic:", err)
-			}
-		}()
-	*/
 	go func() {
 		defer wg.Done()
 		if _, err := missedCallDiff(db); err != nil {
