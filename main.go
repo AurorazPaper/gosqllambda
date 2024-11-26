@@ -44,15 +44,9 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 		return "2", fmt.Errorf("error pinging database: %v", err)
 	}
 
-	if err := createMissedFaxLogTable(db); err != nil {
-		fmt.Printf("Error creating table: %s\n", err)
-	} else {
-		fmt.Println("missed_faxlog table created or already exists.")
-	}
-
 	var wg sync.WaitGroup
 
-	wg.Add(2)
+	wg.Add(3)
 
 	go func() {
 		defer wg.Done()
@@ -116,13 +110,17 @@ func processMissedcalls(db *sql.DB) (string, error) {
 
 }
 
-// ProcessIncompleteFax
+// Processes fax as complete or incomplete, leaves faxincomplete null if entrytype isn't RECV
 func processIncompleteFax(db *sql.DB) (string, error) {
 	updateCallMissed :=
 		`UPDATE xferfaxlog AS missed
-		SET faxincomplete = incomplete
-		WHERE npages != 0
-  			AND reason IS NOT NULL;
+		SET faxincomplete = 
+		  CASE
+		    WHEN entrytype = 'RECV' AND npages != 0 AND reason != '' THEN 1
+		    WHEN entrytype = 'RECV' npages = 0 OR reason = '' THEN 0
+			ELSE faxincomplete
+		END
+		;
 		`
 
 	_, err := db.Exec(updateCallMissed)
@@ -133,9 +131,11 @@ func processIncompleteFax(db *sql.DB) (string, error) {
 	return "incomplete fax processing successful", nil
 
 }
+
+// Processes the difference between a missed call and the next successful one
 func missedCallDiff(db *sql.DB) (string, error) {
 	insertMissedCalls := `
-        INSERT INTO missed_faxlog (id, localnumber, cidname, retrytime)
+        UPDATE theBigTable AS missed
 		SELECT
 			missed.id,
 			missed.localnumber,
@@ -144,12 +144,12 @@ func missedCallDiff(db *sql.DB) (string, error) {
 			LEAST(TIMESTAMPDIFF(MINUTE, missed.datetime, next.datetime), 360)) AS retrytime
 		FROM
 			(SELECT id, localnumber, cidname, datetime
-			FROM xferfaxlog
+			FROM theBigTable
 			WHERE callMissed = 1
 			ORDER BY datetime DESC
 			LIMIT 2500) AS missed
 		LEFT JOIN
-			xferfaxlog AS next ON missed.localnumber = next.localnumber
+			theBigTable AS next ON missed.localnumber = next.localnumber
 			AND missed.cidname = next.cidname
 			AND next.datetime > missed.datetime
 			AND next.datetime <= DATE_ADD(missed.datetime, INTERVAL 360 MINUTE)
