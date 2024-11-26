@@ -117,12 +117,12 @@ func processMissedcalls(db *sql.DB) (string, error) {
 func missedCallDiff(db *sql.DB) (string, error) {
 	// Gets the ID of the next successful fax between two phone numbers
 	getMissDiff := `
-		UPDATE theBigTable base
+		UPDATE xferfaxlog base
 		INNER JOIN (
 			SELECT missed.id, 
 				TIMESTAMPDIFF(MINUTE, missed.datetime, MIN(next.datetime)) as retry_mins
-			FROM theBigTable missed
-			INNER JOIN theBigTable next ON 
+			FROM xferfaxlog missed
+			INNER JOIN xferfaxlog next ON 
 				next.localnumber = missed.localnumber AND 
 				next.cidname = missed.cidname AND
 				next.datetime > missed.datetime AND
