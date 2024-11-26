@@ -89,7 +89,7 @@ func main() {
 // Processes Call entries, categorizes them as missed or not missed
 func processMissedcalls(db *sql.DB) (string, error) {
 	updateCallMissed :=
-		`UPDATE xferfaxlog
+		`UPDATE xferfaxlog AS missed
 		SET callMissed = 
 			CASE
 				WHEN entrytype = 'CALL' AND (reason IS NOT NULL AND reason != '') THEN 1
@@ -116,13 +116,15 @@ func processMissedcalls(db *sql.DB) (string, error) {
 
 }
 
-// ProcessIncompleteFax
 func processIncompleteFax(db *sql.DB) (string, error) {
 	updateCallMissed :=
 		`UPDATE xferfaxlog AS missed
-		SET faxincomplete = incomplete
-		WHERE npages != 0
-  			AND reason IS NOT NULL;
+		SET faxincomplete =
+			CASE
+				WHEN entrytype = 'RECV' AND (reason IS NOT NULL AND reason != '') THEN 1
+				WHEN entrytype = 'RECV' AND (reason IS NULL OR reason = '') THEN 0
+				ELSE faxincomplete
+			END
 		`
 
 	_, err := db.Exec(updateCallMissed)
