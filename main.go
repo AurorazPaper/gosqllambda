@@ -18,6 +18,7 @@ type GoTestEvent struct {
 	Name string `json:"name"`
 }
 
+
 func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 
 	// Retrieve environment variables from Lambda config
