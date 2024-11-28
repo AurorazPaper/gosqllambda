@@ -18,7 +18,6 @@ type GoTestEvent struct {
 	Name string `json:"name"`
 }
 
-
 func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 
 	// Retrieve environment variables from Lambda config
@@ -45,6 +44,7 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 		return "2", fmt.Errorf("error pinging database: %v", err)
 	}
 
+	// The following code is a waitgroup, part of Golang async library
 	var wg sync.WaitGroup
 
 	wg.Add(3)
@@ -120,8 +120,7 @@ func processIncompleteFax(db *sql.DB) (string, error) {
 		    WHEN entrytype = 'RECV' AND npages != 0 AND reason != '' THEN 1
 		    WHEN entrytype = 'RECV' npages = 0 OR reason = '' THEN 0
 			ELSE faxincomplete
-		END
-		;
+		END;
 		`
 
 	_, err := db.Exec(updateCallMissed)
@@ -133,31 +132,38 @@ func processIncompleteFax(db *sql.DB) (string, error) {
 
 }
 
-// Processes the difference between a missed call and the next successful one
+// This solution only works in a static database
+// In a live database, entries younger than 6 hours should be set to null rather than 360
+// This can be done by using the NOW and DATE_SUB functions
+// All entries where retrytime is NULL and entrytype is CALL can be counted as missed calls
 func missedCallDiff(db *sql.DB) (string, error) {
 	insertMissedCalls := `
         UPDATE theBigTable AS missed
-		SELECT
-			missed.id,
-			missed.localnumber,
-			missed.cidname,
-			IF(next.datetime IS NULL, 360,
-			LEAST(TIMESTAMPDIFF(MINUTE, missed.datetime, next.datetime), 360)) AS retrytime
-		FROM
-			(SELECT id, localnumber, cidname, datetime
-			FROM theBigTable
-			WHERE callMissed = 1
-			ORDER BY datetime DESC
-			LIMIT 2500) AS missed
-		LEFT JOIN
-			theBigTable AS next ON missed.localnumber = next.localnumber
-			AND missed.cidname = next.cidname
-			AND next.datetime > missed.datetime
-			AND next.datetime <= DATE_ADD(missed.datetime, INTERVAL 360 MINUTE)
-			AND next.callMissed = 0
-		ORDER BY
-			missed.datetime DESC;
-			`
+		JOIN (
+			SELECT 
+				missed.id,
+				COALESCE( # Replace with CASE for live DB
+					TIMESTAMPDIFF(MINUTE, missed.datetime, 
+						(SELECT MIN(next.datetime) 
+						FROM theBigTable next 
+						WHERE next.localnumber = missed.localnumber 
+						AND next.cidname = missed.cidname 
+						AND next.datetime > missed.datetime 
+						AND next.datetime <= DATE_ADD(missed.datetime, INTERVAL 360 MINUTE)
+						AND next.callMissed = 0)
+					), 
+					360
+				) AS retrytime
+			FROM 
+				theBigTable missed
+			WHERE 
+				missed.callMissed = 1 AND retrytime IS NULL
+			ORDER BY 
+				missed.datetime DESC
+			LIMIT 2500
+		) AS retry ON missed.id = retry.id
+		SET missed.retrytime = retry.retrytime;
+		`
 
 	// Execute the insert query
 	result, err := db.Exec(insertMissedCalls)
