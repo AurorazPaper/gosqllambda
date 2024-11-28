@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sync"
 
 	"github.com/aws/aws-lambda-go/lambda"
 	_ "github.com/go-sql-driver/mysql"
@@ -17,6 +16,9 @@ var db *sql.DB
 type GoTestEvent struct {
 	Name string `json:"name"`
 }
+
+// Make sure to set environment variables to linux and arm64
+// GOOS=linux GOARCH=arm64
 
 func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 
@@ -44,33 +46,25 @@ func HandleRequestTest(ctx context.Context, event GoTestEvent) (string, error) {
 		return "2", fmt.Errorf("error pinging database: %v", err)
 	}
 
-	// The following code is a waitgroup, part of Golang async library
-	var wg sync.WaitGroup
+	// No need for WaitGroup in linear execution
 
-	wg.Add(3)
+	// Process missed calls
+	if _, err := processMissedcalls(db); err != nil {
+		log.Println("Failure to process missed calls:", err)
+	}
 
-	go func() {
-		defer wg.Done()
-		if _, err := processMissedcalls(db); err != nil {
-			log.Println("Failure to process missed calls:", err)
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		if _, err := processIncompleteFax(db); err != nil {
-			log.Println("Failure to process incomplete faxes:", err)
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		if _, err := missedCallDiff(db); err != nil {
-			log.Println("Failure to process call difference logic:", err)
-		}
-	}()
+	// Process incomplete faxes
+	if _, err := processIncompleteFax(db); err != nil {
+		log.Println("Failure to process incomplete faxes:", err)
+	}
 
-	wg.Wait()
+	// Process call difference logic
+	if _, err := missedCallDiff(db); err != nil {
+		log.Println("Failure to process call difference logic:", err)
+	}
 
 	defer db.Close()
+
 	return "Successfully connected to RDS", nil
 
 }
@@ -118,7 +112,7 @@ func processIncompleteFax(db *sql.DB) (string, error) {
 		SET faxincomplete = 
 		  CASE
 		    WHEN entrytype = 'RECV' AND npages != 0 AND reason != '' THEN 1
-		    WHEN entrytype = 'RECV' npages = 0 OR reason = '' THEN 0
+		    WHEN entrytype = 'RECV' AND (npages = 0 OR reason = '') THEN 0
 			ELSE faxincomplete
 		END;
 		`
