@@ -8,3 +8,5 @@ One pitfall that is important to note is that the performance of the query is de
 Also worth noting, the code is designed for the static demo, choices were made to simplify code to make it easier to understand and to manage time constraints.
 CASE should be used over coalesce in the missedCallDiff query, with a case to catch files younger than 6 hours that still don't have a match, and keep them null
 This can be done by checking datetime against DATE_SUB(NOW(), INTERVAL 360 MINUTE)
+
+Metabase settings are included in the RDS Database, making it more production ready and easier to transfer to another server or a docker container
